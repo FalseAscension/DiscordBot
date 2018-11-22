@@ -1,22 +1,22 @@
-#    This file is part of DiscordBot
-#    Project Home: https://github.com/FalseAscension/DiscordBot
+#    This file is part of FalseBot
+#    Project Home: https://github.com/FalseAscension/FalseBot
 #
-#    DiscordBot is free software: you can redistribute it and/or modify
+#    FalseBot is free software: you can redistribute it and/or modify
 #    it under the terms of the GNU General Public License as published by
 #    the Free Software Foundation, either version 3 of the License, or
 #    (at your option) any later version.
 #
-#    DiscordBot is distributed in the hope that it will be useful,
+#    FalseBot is distributed in the hope that it will be useful,
 #    but WITHOUT ANY WARRANTY; without even the implied warranty of
 #    MERCHANTABILITY or FITNESS FOR A PARTICULAR PURPOSE.  See the
 #    GNU General Public License for more details.
 #
 #    You should have received a copy of the GNU General Public License
-#    along with DiscordBot.  If not, see <https://www.gnu.org/licenses/>.
+#    along with FalseBot.  If not, see <https://www.gnu.org/licenses/>.
 
 import json,time,asyncio,aiohttp
 
-apiUrl = "https://discordapp.com/api"
+apiUrl = "https://discordapp.com/api/"
 
 class opcodes:
     """ 
@@ -41,7 +41,9 @@ class discord_chat_handler:
         A class to be used in conjunction with discord_bot_connection allowing for an easy way
         to bind chat messages to functions.
     
-            ch = discord_chat_handler(discord_bot_connection instance)
+            ch = discord_chat_handler(discord_bot_connection instance, 
+                **kwargs { bufferSize : integer,    The size of the buffer to be used for per-channel chat history.
+                            }
 
         Function Definitions:
 
@@ -60,7 +62,14 @@ class discord_chat_handler:
                                         kwargs,     keyword args, sometimes containing
                                                     no_self_response (see above).
 
-                                Function decorator to pass a decorated function to register_match()
+                                Function decorator to pass a decorated function to register_match().
+                                Decorated function will be given a discord message object (https://discordapp.com/developers/docs/resources/channel#message-object)
+                                Matcher is given a message object.
+
+            matchContent()
+                                See above.
+
+                                For convenience passes the matcher just the message content.
 
             handle_message_create()
                                 params: message,    The message object to be passed by
@@ -72,24 +81,32 @@ class discord_chat_handler:
 
         Matchers:
 
-            A matcher can be any function whose returns value is not 'None' or 'False#  when called 
-            with one argument of a string it is intended to match.
+            A matcher can be any function who returns 'True' when it is passed an appropriate message.
 
                 For example:
                     re.compile('match').match       When this is called with arguments 'match', 
                                                     this should return a MatchObject, eg not None.
                     (lambda x: "foobar" in x)       When this is called with args "foobar" or 
-                                                    "barfoobar" (etc) returns True
+                                                    "barfoobar" (etc) returns True.
 
+                Matchers are passed a discord 'message' object in the form of a dictionary, unless
+                created by 'matchContent' in which they are passed the message's content for
+                simplicity.
 
-                                                    
     """
+    
+    channelBuffer = {}
 
-    def __init__(self, bot_connection):
+    def __init__(self, bot_connection, **kwargs):
         bot_connection.register_dispatch('MESSAGE_CREATE',self.handle_message_create)
         self.bot_connection = bot_connection
+
+        self.bufferSize = 3
+        if 'bufferSize' in kwargs:
+            self.bufferSize = kwargs['bufferSize']
+
     
-    # Regular expression registry for matching chat messages. ([KEYS],[FUNCTIONS])
+    # Regular expression registry for matching chat messages. ([MATCHERS],[FUNCTIONS])
     match_registry = ([], [])
     def register_match(self, matcher, func, no_self_respond=True):
         matcher = { "matcher":matcher, "no_self_respond":no_self_respond }
@@ -98,7 +115,7 @@ class discord_chat_handler:
             print(f"WARNING: Chat expression {expression} already registered. Re-registering to {func.__name__}")
 
         self.match_registry[0].append(matcher)
-        self.match_registry[1].append(func)
+        self.match_registry[1].append(asyncio.coroutine(func))
     
     def match(self, matcher, **kwargs):
         no_self_respond = True
@@ -110,14 +127,25 @@ class discord_chat_handler:
             return func
 
         return decorator
-   
+
+    def matchContent(self, matcher, **kwargs):
+        newmatcher = lambda m: matcher(m['content'])
+        return self.match(newmatcher, **kwargs)
+
     async def handle_message_create(self, message):
-        content = message['content']
+        
+        # If buffering is not disabled, append to the correct channel buffer.
+        if self.bufferSize > 0:
+            if message['channel_id'] not in self.channelBuffer:
+                self.channelBuffer[message['channel_id']] = [None for i in range(self.bufferSize)]
+
+            self.channelBuffer[message['channel_id']].pop(0)
+            self.channelBuffer[message['channel_id']].append(message)
 
         for i,matcher in enumerate(self.match_registry[0]): # Find a matcher whose return value is not 'None' or 'False' and call it's respective function.
             if message['author']['id'] == self.bot_connection.user['id'] and matcher['no_self_respond']: # Don't reply to self unless explicity defined in matcher.
                 continue
-            if matcher['matcher'](message['content']):
+            if matcher['matcher'](message):
                 await self.match_registry[1][i](message)
 
 class discord_bot_connection:
@@ -169,17 +197,15 @@ class discord_bot_connection:
                                 object,
 
             api_get_call()      params: path,       relative path for API to be called.
-                                        params,     HTTP GET data dict.
-                                        headers,    HTTP headers dict.
+                                        **kwargs    passed to the aiohttp client session.
             
                                 Invoke a call to the Discord RESTful API via method GET and return the
                                 JSON object.
                                 See https://discordapp.com/developers/docs/topics/gateway#get-gateway
 
             api_post_call()     params: path,       "
-                                        params,     "
-                                        headers,    "
                                         data,       HTTP POST Body. Object to be converted to JSON
+                                        **kwargs    passed to the aiohttp client session.
 
                                 Invoke a call to the Discord RESTful API via method POST and return the 
                                 JSON object.
@@ -204,9 +230,9 @@ class discord_bot_connection:
                                                     should be bound to.
                                         func,       Function to bind this event to.
 
-                                Place a function into the dispatch_refistry dict.
+                                Place a function into the dispatch_registry dict.
             
-            register()          params: event,      "
+            dispatch()          params: event,      "
                             
                                 Function decorator to pass a decorated function to register_dispatch()
     """
@@ -217,8 +243,13 @@ class discord_bot_connection:
     guilds = {}             # Guilds bot is a member of. Keyed by ID. Type of 'Guild Object' (https://discordapp.com/developers/docs/resources/guild#guild-object)
     session_id = None       # Current Session ID of the bot. Used for resuming in case of connection loss (not yet implemented).
 
-    def __init__(self, botToken):
+
+    APIToken = None
+
+    def __init__(self, botToken, clientID=None, clientSecret=None):
         self.botToken = botToken
+        self.clientID = clientID
+        self.clientSecret = clientSecret
     
     # Register functions to Discord API low-level events.
     dispatch_registry = {}
@@ -239,7 +270,7 @@ class discord_bot_connection:
     def register_message(self, opcode, func):
         if opcode in self.message_registry:
             print(f"WARNING: Opcode {opcode} already registered, re-registering to {func.__name__}")
-        self.message_registry[opcode] = func
+        self.message_registry[opcode] = asyncio.coroutine(func)
     
     # @bot.message(opcode) decorator
     def message(self, opcode):
@@ -249,24 +280,26 @@ class discord_bot_connection:
         return decorator
 
     # Return the JSON body from a Discord RESTful API GET call.
-    async def api_get_call(self, path, params={}, headers={}):
+    async def api_get_call(self, path, url=apiUrl, **kwargs):
         async with aiohttp.ClientSession() as session:
-            async with session.get(f"{apiUrl}{path}", params=params, headers=headers) as response:
+            async with session.get(f"{url}{path}", **kwargs) as response:
                 assert 200 == response.status, response.reason
                 return await response.json()
 
     # Same as above with a JSON POST payload.
-    async def api_post_call(self, path, params={}, headers={}, data={}):
+    async def api_post_call(self, path, data=None, **kwargs):
         async with aiohttp.ClientSession() as session:
-            async with session.post(f"{apiUrl}{path}", params=params, headers=headers, json=data) as response:
+            async with session.post(f"{apiUrl}{path}", json=data, **kwargs) as response:
                 assert 200 == response.status, response.reason
-                return await response.text()
+                return await response.json()
     
     # Send a message to a channel via a Discord RESTful API POST call.
-    async def say_in_channel(self, channelId, message):
-        return await self.api_post_call(f"/channels/{channelId}/messages", 
+    def say_in_channel(self, channelId, message):
+        asyncio.get_event_loop().create_task(
+            self.api_post_call(f"/channels/{channelId}/messages", 
                 headers={   "Authorization":f"Bot {self.botToken}" }, 
-                data={"content":message}) 
+                data={"content":message})
+            )
 
     # Send a JSON payload to the server.
     async def send_payload(self, op, d, s=None, t=None):
@@ -277,7 +310,7 @@ class discord_bot_connection:
     ack = True
     sequence = None
     
-    # Send a heartbeat to the server eat the correct interval.
+    # Send a heartbeat to the server at the correct interval.
     async def heartbeat(self, interval):
         while True:
             if not self.ack:                # We did not receive a HEARTBEAT_ACK response. Something is wrong!! (Not yet implemented)
@@ -374,10 +407,13 @@ class discord_bot_connection:
         await self.send_payload(opcodes.IDENTIFY, payload)            
 
     async def start(self):
-        response = await self.api_get_call("/gateway/bot", headers={"Authorization":self.botToken})
-           
+        #response = await self.api_post_call("/oauth2/token", params={'grant_type':'client_credentials', 'scope':'identify bot'}, auth=aiohttp.BasicAuth(self.clientID, self.clientSecret))
+        #self.APIToken = response['access_token']
+
+        response = await self.api_get_call("/gateway/bot", headers={"Authorization":"Bot " + self.botToken}, url="https://discordapp.com/api/")
+        gatewayUrl = response['url']
         async with aiohttp.ClientSession() as session:
-            async with session.ws_connect(f"{response['url']}?v=6&encoding=json") as self.ws:
+            async with session.ws_connect(f"{gatewayUrl}?v=6&encoding=json") as self.ws:
                 await self.identify()
                 async for msg in self.ws:
                     await self.handle_message(msg.json())
