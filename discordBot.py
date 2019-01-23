@@ -101,12 +101,12 @@ class discord_chat_handler:
         bot_connection.register_dispatch('MESSAGE_CREATE',self.handle_message_create)
         self.bot_connection = bot_connection
 
-        self.bufferSize = 3
         if 'bufferSize' in kwargs:
             self.bufferSize = kwargs['bufferSize']
-
+        else:
+            self.bufferSize = 3
     
-    # Regular expression registry for matching chat messages. ([MATCHERS],[FUNCTIONS])
+    # Expression registry for matching chat messages. ([MATCHERS],[FUNCTIONS])
     match_registry = ([], [])
     def register_match(self, matcher, func, no_self_respond=True):
         matcher = { "matcher":matcher, "no_self_respond":no_self_respond }
@@ -117,6 +117,9 @@ class discord_chat_handler:
         self.match_registry[0].append(matcher)
         self.match_registry[1].append(asyncio.coroutine(func))
     
+    # Match a message. Will provide a discord message object to decorated functions
+    # which match.
+    # See https://discordapp.com/developers/docs/resources/channel#message-object
     def match(self, matcher, **kwargs):
         no_self_respond = True
         if 'no_self_respond' in kwargs:
@@ -127,10 +130,10 @@ class discord_chat_handler:
             return func
 
         return decorator
-
+    
+    # Same as match, however only provides the message content.
     def matchContent(self, matcher, **kwargs):
-        newmatcher = lambda m: matcher(m['content'])
-        return self.match(newmatcher, **kwargs)
+        return self.match(lambda m: matcher(m['content']), **kwargs)
 
     async def handle_message_create(self, message):
         
@@ -204,7 +207,6 @@ class discord_bot_connection:
                                 See https://discordapp.com/developers/docs/topics/gateway#get-gateway
 
             api_post_call()     params: path,       "
-                                        data,       HTTP POST Body. Object to be converted to JSON
                                         **kwargs    passed to the aiohttp client session.
 
                                 Invoke a call to the Discord RESTful API via method POST and return the 
@@ -250,6 +252,7 @@ class discord_bot_connection:
         self.botToken = botToken
         self.clientID = clientID
         self.clientSecret = clientSecret
+        self.userAgent = "FalseBot (Python 3.7 AIOHTTP)"
     
     # Register functions to Discord API low-level events.
     dispatch_registry = {}
@@ -287,24 +290,52 @@ class discord_bot_connection:
                 return await response.json()
 
     # Same as above with a JSON POST payload.
-    async def api_post_call(self, path, data=None, **kwargs):
+    async def api_post_call(self, path, **kwargs):
+        headers = {
+                'Authorization': 'Bot ' + self.botToken,
+                'User-Agent': self.userAgent
+                }
+
+        if 'json' in kwargs:
+            headers['Content-Type'] = 'application/json'
+
+        kwargs['headers'] = headers
+
         async with aiohttp.ClientSession() as session:
-            async with session.post(f"{apiUrl}{path}", json=data, **kwargs) as response:
+            async with session.post(f"{apiUrl}{path}", **kwargs) as response:
                 assert 200 == response.status, response.reason
                 return await response.json()
     
-    # Send a message to a channel via a Discord RESTful API POST call.
-    def say_in_channel(self, channelId, message):
+
+    # Send a create message command via the Discord RESTful API.
+    async def create_message_async(self, channelId, **kwargs):
+        await self.api_post_call(f"/channels/{channelId}/messages",
+                **kwargs
+                )
+    
+    # Callable without await-ing
+    def create_message(self, channelId, **kwargs):
         asyncio.get_event_loop().create_task(
-            self.api_post_call(f"/channels/{channelId}/messages", 
-                headers={   "Authorization":f"Bot {self.botToken}" }, 
-                data={"content":message})
+                self.create_message_async(channelId, **kwargs)
             )
+
+    def say_in_channel(self, channelId, message):
+        self.create_message(channelId, data={'content':message})
+
+    def send_file(self, channelId, filebuf, filename=None, **kwargs):
+        form = aiohttp.FormData()
+        
+        form.add_field('payload_json', json.dumps(kwargs))
+        form.add_field('file', filebuf, filename=filename, content_type='application/octet-stream')
+
+        self.create_message(channelId, data=form)
+
 
     # Send a JSON payload to the server.
     async def send_payload(self, op, d, s=None, t=None):
         payload = {"op":op, "d":d, "s":s, "t":t}
         await self.ws.send_json(payload)
+
 
     # Heartbeat information
     ack = True

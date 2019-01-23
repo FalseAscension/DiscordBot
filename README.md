@@ -1,6 +1,6 @@
-# DiscordBot
+# FalseBot
 
-DiscordBot is an Asynchronous, Modular Python port of the Discord Websocket Gateway API (with limited support for the RESTful API).
+FalseBot is an Asynchronous, Modular Python port of the Discord Websocket Gateway API (with limited support for the RESTful API).
 
 See https://discordapp.com/developers/docs/topics/gateway for the specification.
 
@@ -26,7 +26,7 @@ See the main 'discordBot.py' internal commentary for complete documentation.
 
 ## Demo
 
-Included is a quick demo program 'hello.py'.
+Included is a demo program 'falsebot.py'.
 
 To set up, first put your Bot Token into file 'botToken' in the project directory.
 ```
@@ -35,13 +35,15 @@ echo "....." > botToken
 
 You will need to add your bot to a server to start. 'Manage Server' permissions is required for this. See https://discordapp.com/developers/docs/topics/oauth2#bots for information on adding to a server.
 
-Next, simply run 'hello.py':
+Next, simply run 'falsebot.py':
 ```
-python hello.py
+python3.7 falsebot.py
 ```
 
 Your bot should appear online and spit some information about the Guilds it is in into the console.
 
-Upon receiving a message containing "TF2", the bot should respond "TF2 is ILLEGAL in this server".
-
 For any messages containing "siege", the bot should respond "seej".
+The bot will reply to "hello falsebot" with "Hello, World!
+
+Included at the later end of the file are the start of some image processing functions. 
+In this version I am just playing around, and once I have something polished enough I will likely merge some of the decorators and utility functions into their own class.
