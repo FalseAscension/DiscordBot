@@ -96,12 +96,6 @@ def findRecentImage(channelId):
     url = None
     for m in reversed(ch.channelBuffer[channelId]):
         if m and m['attachments'] and len(m['attachments']) > 0:# Dump the entire channel buffer (3 messages by default)
-@ch.matchContent(lambda x: x.startswith('^bufferdump'))
-def bufferDump(message):
-    bot.say_in_channel(message['channel_id'], "Dumping buffer...")
-    for m in ch.channelBuffer[message['channel_id']]:
-        if m:
-            bot.say_in_channel(message['channel_id'], m['content'])
             url = m['attachments'][0]['url']
     if not url:
         return None
