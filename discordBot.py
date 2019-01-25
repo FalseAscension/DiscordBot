@@ -212,7 +212,7 @@ class discord_bot_connection:
                                 Invoke a call to the Discord RESTful API via method POST and return the 
                                 JSON object.
 
-            say_in_channel()    params: channelId,  The ID of the channel for which to send the message
+            say_in_channel()    params: channel_id,  The ID of the channel for which to send the message
                                         message,    The message to be sent.
 
                                 Send a message to a channel through a Discord RESTful API POST call,
@@ -308,27 +308,27 @@ class discord_bot_connection:
     
 
     # Send a create message command via the Discord RESTful API.
-    async def create_message_async(self, channelId, **kwargs):
-        await self.api_post_call(f"/channels/{channelId}/messages",
+    async def create_message_async(self, channel_id, **kwargs):
+        await self.api_post_call(f"/channels/{channel_id}/messages",
                 **kwargs
                 )
     
     # Callable without await-ing
-    def create_message(self, channelId, **kwargs):
+    def create_message(self, channel_id, **kwargs):
         asyncio.get_event_loop().create_task(
-                self.create_message_async(channelId, **kwargs)
+                self.create_message_async(channel_id, **kwargs)
             )
 
-    def say_in_channel(self, channelId, message):
-        self.create_message(channelId, data={'content':message})
+    def say_in_channel(self, channel_id, message):
+        self.create_message(channel_id, data={'content':message})
 
-    def send_file(self, channelId, filebuf, filename=None, **kwargs):
+    def send_file(self, channel_id, filebuf, filename=None, **kwargs):
         form = aiohttp.FormData()
         
         form.add_field('payload_json', json.dumps(kwargs))
         form.add_field('file', filebuf, filename=filename, content_type='application/octet-stream')
 
-        self.create_message(channelId, data=form)
+        self.create_message(channel_id, data=form)
 
 
     # Send a JSON payload to the server.

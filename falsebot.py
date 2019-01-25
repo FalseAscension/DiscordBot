@@ -26,6 +26,7 @@ bot = discord_bot_connection(**tokens)
 # Initialise a chat handler object.
 ch = discord_chat_handler(bot)
 
+from contextlib import redirect_stdout
 # A function decorator useful for creating a command with keyword arguments. Not yet completely polished, does the job for now,
 def commandWithArgs(description, **kwargs):
     def makeWrapper(func):
@@ -80,21 +81,17 @@ def helloWorld(message):
 import urllib.request,io
 from PIL import Image, ImageDraw, ImageFont
 
-def averageOfThree(p):
-    return (p[0]+p[1]+p[2])/3
-def perceivedBrightness(p):
-    return 0.2126*p[0] + 0.7152*p[1] + 0.0722*p[2]
-brightness = perceivedBrightness
-
+# Just an easy way to take a PIL image and convert it to a file-like object.
 def fileFromImage(Image, format="jpeg"):
     newfile = io.BytesIO()
     Image.save(newfile, format=format)
     newfile.seek(0)
     return newfile
 
-def findRecentImage(channelId):
+# Looks through the channel buffer for a given channel for any images.
+def findRecentImageInChannel(channel_id):
     url = None
-    for m in reversed(ch.channelBuffer[channelId]):
+    for m in reversed(ch.channelBuffer[channel_id]):
         if m and m['attachments'] and len(m['attachments']) > 0:# Dump the entire channel buffer (3 messages by default)
             url = m['attachments'][0]['url']
     if not url:
@@ -112,7 +109,7 @@ def findRecentImage(channelId):
 # kwargs are preserved through to the decorated function.
 def imageCommand(func):
     def wrapper(message, **kwargs):
-        img = findRecentImage(message['channel_id'])
+        img = findRecentImageInChannel(message['channel_id'])
         if not img:
             return bot.say_in_channel(message['channel_id'], "Sorry, I could not find a recent image to process.")
         out = func(img, **kwargs)
@@ -121,7 +118,12 @@ def imageCommand(func):
 
 ## All the image stuff above should probably be moved to a new class or discord_chat_handler at the very least
 
-from contextlib import redirect_stdout
+
+def averageOfThree(p):
+    return (p[0]+p[1]+p[2])/3
+def perceivedBrightness(p):
+    return 0.2126*p[0] + 0.7152*p[1] + 0.0722*p[2]
+brightness = perceivedBrightness
 
 def bandw(img):
     size = img.size
@@ -133,11 +135,13 @@ def bandw(img):
     out.putdata(bandw)
 
     return out
-# I want to re-use this algorithm in another one, so keep it accessable...
+# I want to re-use this algorithm in another function, so avoid decorating it...
 ch.matchContent(re.compile("^\^bandw").search)(imageCommand(bandw))
 
-
 # ASCII Characters corresponding to brightness values (lookup table)
+# I generated this with an external script which drew each character and averaged
+# it's brightness by summing each pixel and diving by the size.
+# For each value from 0-255 I then assigned an ascii character.
 brightchars = [
  ' ', ' ', ' ', ' ', ' ', '~', '~', '~', '~', '~', '~', '~', '~', ':', ':', ':', 
  ':', ':', ':', ':', ':', ':', ':', '`', '`', '`', '`', '`', '`', '+', '+', '+', 
@@ -174,64 +178,21 @@ def ascii(img, **kwargs):
     img = img.resize((int(size[0]/kwargs['downscaling']), int(size[1]/kwargs['downscaling'])))
     size = img.size
     img = list(img.getdata())
-
+    
+    # Assign an ascii character to each pixel.
     characters = list(map(lambda b: brightchars[b], img))
-
-    #characters=[0]*len(img)
-    #for i,p in enumerate(img):
-    #    characters[i] = reduce(lambda i,x: x if abs(p-charbrightness[x]) < abs(p-charbrightness[i]) else i, range(len(charbrightness))) + 32
 
     asciised = Image.new('RGB', (size[0]*10,size[1]*10), color=kwargs['background'])
     draw = ImageDraw.Draw(asciised)
-    #font = ImageFont.truetype("/usr/share/fonts/TTF/arial.ttf")
-
+    
+    # Draw an image with all these ascii chars.
     for y in range(size[1]):
         for x in range(size[0]):
             index = y*size[0]+x
             draw.text((x*10 - 2.5, y*10), characters[index], fill=kwargs['foreground'])
     
-    asciised.save("ascii.png")
-
     return asciised
 
-def drawLayeredText(img, xy, text, fcolour, bcolour, ffont, bfont, spacing=0):
-    draw = ImageDraw.Draw(img)
-
-    cursor = xy
-    for c in text:
-        bw, bh = draw.textsize(c, font=bfont)
-        fw, fh = draw.textsize(c, font=ffont)
-        
-        draw.text(cursor,                                               c, fill=bcolour, font=bfont)
-        draw.text((cursor[0] + (bw - fw)/2, cursor[1] + (bh - fh)/2),   c, fill=fcolour, font=ffont)
-        cursor = (cursor[0] + bw + spacing, cursor[1])
-
-    return img
-
-@ch.matchContent(re.compile("^\^memetext").search)
-@commandWithArgs("Add top and bottom meme text to an image.", name="^memetext",
-            top={"help":"Top text.", "default":"", "type":str}, 
-            bot={"help":"Bottom text.", "default":"", "type":str},
-            typeface={"help":"The typeface to use (if installed).", "default":"impact", "type":str},
-            fontsize={"help":"The font size to use.", "default":72, "type":int},
-            outline={"help":"The width of the text outline.", "default":10, "type":int},
-            colour={"help":"The colour of the text (R,G,B).", "default":(255,255,255), "type":lambda x: tuple(map(int, x.split(',') ) )},
-            outlinecolour={"help":"The colour of the text outline (R,G,B).", "default":(0,0,0), "type":lambda x: tuple(map(int, x.split(',') ) )}
-            )
-@imageCommand
-def memetext(img, **kwargs):
-    draw = ImageDraw.Draw(img)
-
-    print(kwargs['typeface'])
-    fface = ImageFont.truetype(kwargs['typeface'], kwargs['fontsize'])
-    bface = ImageFont.truetype(kwargs['typeface'], kwargs['fontsize'] + kwargs['outline'])
-
-    W, H = img.size
-    bw, bh = draw.textsize(kwargs['bot'], font=bface)
-    
-    drawLayeredText(img, (W/2 - bw/2, bh/2 + 5), kwargs['top'], kwargs['colour'], kwargs['outlinecolour'], fface, bface)
-
-    return img
 
 if __name__ == "__main__":
     asyncio.run(bot.start())
